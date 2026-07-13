@@ -1,0 +1,18 @@
+services:
+  endorse:
+    build: .
+    image: endorsement
+    container_name: endorse_to_fa
+    restart: unless-stopped
+    ports:
+      - "5005:5005"
+    env_file:
+      - .env
+    environment:
+      - FLASK_DEBUG=false
+    networks:
+      - manufacturing_network
+
+networks:
+  manufacturing_network:
+    driver: bridge
