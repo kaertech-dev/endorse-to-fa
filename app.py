@@ -8,7 +8,7 @@ from flask import (
     url_for, session, jsonify, flash
 )
 from config import get_db_connection
-from functions import authenticate, check_serial_in_main
+from functions import authenticate, check_serial_in_station
 import pymysql
 import pymysql.cursors
 import bcrypt
@@ -211,27 +211,37 @@ def api_lookup_serial():
 @login_required
 def api_check_serial_main():
     """
-    Validate a serial number against the model's master registry table:
-        <product>.<model>_main
-    e.g. product="energous", model="esense" -> energous.esense_main
+    Validate a serial number against the selected product/model/station's
+    data table:
+        <product>.<model>_<station>
+    e.g. product="energous", model="esense", station="packaging"
+         -> energous.esense_packaging
 
-    This is the "is this a real, known unit" check, independent of whether
-    it already has an FA case in main_copy.
+    This is the "is this a real, known unit for this station" check,
+    independent of whether it already has an FA case in main_copy. On a
+    match it also returns po_num and fail_reason so the form can auto-fill
+    the PO and Failure Mode fields.
     """
     product = request.args.get("product", "").strip()
     model = request.args.get("model", "").strip()
+    station = request.args.get("station", "").strip()
     serial = request.args.get("serial", "").strip()
 
-    if not product or not model or not serial:
-        return jsonify({"table_checked": None, "table_exists": False, "found": False})
+    if not product or not model or not station or not serial:
+        return jsonify({
+            "table_checked": None, "table_exists": False, "found": False,
+            "po_num": None, "fail_reason": None,
+        })
 
     try:
-        result = check_serial_in_main(product, model, serial)
+        result = check_serial_in_station(product, model, station, serial)
     except pymysql.MySQLError as e:
         return jsonify({
-            "table_checked": f"{product}.{model}_main",
+            "table_checked": f"{product}.{model}_{station}",
             "table_exists": False,
             "found": False,
+            "po_num": None,
+            "fail_reason": None,
             "error": f"Database error: {e}",
         })
 
@@ -250,30 +260,31 @@ def api_endorse():
     product = (data.get("product") or "").strip() or None
     model = (data.get("model") or "").strip() or None
     station = (data.get("station") or "").strip() or None
-    test_failure = (data.get("failure_mode") or "").strip() or None
 
     if not serial_num:
         return jsonify({"success": False, "message": "Serial number is required."}), 400
 
-    if not product or not model:
-        return jsonify({"success": False, "message": "Product and model are required."}), 400
+    if not product or not model or not station:
+        return jsonify({"success": False, "message": "Product, model, and station are required."}), 400
 
     # Server-side re-check (mirrors the client-side check) so the gate
     # can't be bypassed by calling this endpoint directly.
     try:
-        check = check_serial_in_main(product, model, serial_num)
+        check = check_serial_in_station(product, model, station, serial_num)
     except pymysql.MySQLError as e:
         return jsonify({"success": False, "message": f"Database error: {e}"}), 500
 
     if not check["found"]:
         if not check["table_exists"]:
-            message = f"Master table {check['table_checked']} does not exist."
+            message = f"Table {check['table_checked']} does not exist."
         else:
             message = f"No record found for serial {serial_num} in {check['table_checked']}."
         return jsonify({"success": False, "message": message}), 400
 
-    # PO is auto-filled from <product>.<model>_main, never typed in by the user.
+    # PO and failure mode are auto-filled from <product>.<model>_<station>,
+    # never typed in by the user.
     po_num = check["po_num"]
+    test_failure = check["fail_reason"]
 
     # Endorser stored as employee_num only, per your latest version.
     endorser_label = f"{session['employee_num']}"
@@ -285,9 +296,9 @@ def api_endorse():
                 """
                 INSERT INTO main_copy
                     (serial_num, product, model, po_num, station,
-                     test_failure, prod_endorser, faendorse_datetime, proposed_action, fa_class)
+                     test_failure, prod_endorser, faendorse_datetime, proposed_action, fa_class, farepair_status)
                 VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1,1)
                 ON DUPLICATE KEY UPDATE
                     product = VALUES(product),
                     model = VALUES(model),

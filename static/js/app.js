@@ -9,7 +9,7 @@ const endorseBtn = document.getElementById("endorseBtn");
 const toast = document.getElementById("toast");
 
 // Tracks whether the currently-entered serial has been confirmed to exist
-// in <product>.<model>_main. Reset any time product/model/serial changes.
+// in <product>.<model>_<station>. Reset any time product/model/station/serial changes.
 let serialValidated = false;
 
 function setText(msg) {
@@ -39,6 +39,7 @@ function fillSelect(select, values, placeholder) {
 function resetSerialValidation() {
   serialValidated = false;
   poInput.value = "";
+  failureModeBox.value = "";
 }
 
 async function loadProducts() {
@@ -110,36 +111,39 @@ async function lookupSerial(serial) {
   }
 }
 
-// Confirms the serial is a known unit by checking <product>.<model>_main.
-// Requires product + model to already be selected.
-async function checkSerialInMain(product, model, serial) {
-  if (!product || !model || !serial) {
+// Confirms the serial is a known unit by checking <product>.<model>_<station>.
+// Requires product + model + station to already be selected.
+async function checkSerialInMain(product, model, station, serial) {
+  if (!product || !model || !station || !serial) {
     resetSerialValidation();
     return;
   }
   try {
     const res = await fetch(
-      `/api/check_serial_main?product=${encodeURIComponent(product)}&model=${encodeURIComponent(model)}&serial=${encodeURIComponent(serial)}`
+      `/api/check_serial_main?product=${encodeURIComponent(product)}&model=${encodeURIComponent(model)}&station=${encodeURIComponent(station)}&serial=${encodeURIComponent(serial)}`
     );
     const data = await res.json();
 
     if (data.found) {
       serialValidated = true;
       poInput.value = data.po_num || "";
-      setText(`Serial ${serial} found in ${data.table_checked}. PO auto-filled. Ready to endorse.`);
+      failureModeBox.value = data.fail_reason || "";
+      setText(`Serial ${serial} found in ${data.table_checked}. PO and failure mode auto-filled. Ready to endorse.`);
       return;
     }
 
     serialValidated = false;
     poInput.value = "";
+    failureModeBox.value = "";
     const reason = data.table_exists
       ? `No record found for serial ${serial} in ${data.table_checked}.`
-      : `Master table ${data.table_checked} does not exist.`;
+      : `Table ${data.table_checked} does not exist.`;
     setText(reason);
     showToast(reason, "error");
   } catch (e) {
     serialValidated = false;
     poInput.value = "";
+    failureModeBox.value = "";
     setText("Could not reach the server to validate this serial number.");
   }
 }
@@ -151,7 +155,7 @@ async function handleSerialEntry() {
     return;
   }
   await lookupSerial(serial);
-  await checkSerialInMain(productSelect.value, modelSelect.value, serial);
+  await checkSerialInMain(productSelect.value, modelSelect.value, stationSelect.value, serial);
 }
 
 productSelect?.addEventListener("change", () => {
@@ -161,6 +165,9 @@ productSelect?.addEventListener("change", () => {
 modelSelect?.addEventListener("change", () => {
   resetSerialValidation();
   loadStations(productSelect.value, modelSelect.value);
+});
+stationSelect?.addEventListener("change", () => {
+  resetSerialValidation();
 });
 
 serialInput.addEventListener("input", resetSerialValidation);
@@ -186,15 +193,15 @@ endorseBtn.addEventListener("click", async () => {
     setText("Please enter a serial number before endorsing.");
     return;
   }
-  if (!payload.product || !payload.model) {
-    setText("Please select a product and model before endorsing.");
+  if (!payload.product || !payload.model || !payload.station) {
+    setText("Please select a product, model, and station before endorsing.");
     return;
   }
 
   // Client-side gate: re-validate if the serial hasn't been confirmed yet
   // (e.g. user edited the serial after it was validated).
   if (!serialValidated) {
-    await checkSerialInMain(payload.product, payload.model, payload.serial_number);
+    await checkSerialInMain(payload.product, payload.model, payload.station, payload.serial_number);
     if (!serialValidated) {
       return; // checkSerialInMain already showed the reason
     }
@@ -202,7 +209,7 @@ endorseBtn.addEventListener("click", async () => {
 
   endorseBtn.disabled = true;
   try {
-    // Server re-checks <product>.<model>_main again on submit, so this
+    // Server re-checks <product>.<model>_<station> again on submit, so this
     // stays authoritative even if someone bypasses the client-side check.
     const res = await fetch("/api/endorse", {
       method: "POST",
@@ -230,6 +237,8 @@ endorseBtn.addEventListener("click", async () => {
 
 poInput.readOnly = true;
 poInput.placeholder = "Auto-filled from serial lookup";
+failureModeBox.readOnly = true;
+failureModeBox.placeholder = "Auto-filled from serial lookup";
 
 loadProducts();
 fillSelect(modelSelect, [], "Select product first");

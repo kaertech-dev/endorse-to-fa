@@ -104,16 +104,17 @@ def get_all_and_check_main(parse_all: str) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Serial validation against a product/model's master registry table
+# Serial validation against the selected product/model/station data table
 #
-#   <product_schema>.<model>_main
-#   e.g. product="energous", model="esense" -> energous.esense_main
+#   <product_schema>.<model>_<station>
+#   e.g. product="energous", model="esense", station="packaging"
+#        -> energous.esense_packaging
 #
-# `product` and `model` are values that originated from the UI dropdowns,
-# so before we ever build a SQL identifier out of them we re-verify the
-# exact schema/table pair against information_schema using a parameterized
-# query. Only a pair that is confirmed to actually exist gets turned into
-# a (backtick-quoted) identifier for the follow-up SELECT.
+# `product`, `model`, and `station` are values that originated from the UI
+# dropdowns, so before we ever build a SQL identifier out of them we
+# re-verify the exact schema/table pair against information_schema using a
+# parameterized query. Only a pair that is confirmed to actually exist gets
+# turned into a (backtick-quoted) identifier for the follow-up SELECT.
 # ---------------------------------------------------------------------------
 def _quote_ident(name: str) -> str:
     """Safely quote a MySQL identifier (schema or table name)."""
@@ -139,25 +140,32 @@ def _table_exists(schema: str, table: str) -> bool:
         conn.close()
 
 
-def check_serial_in_main(product: str, model: str, serial_num: str) -> dict:
+def check_serial_in_station(product: str, model: str, station: str, serial_num: str) -> dict:
     """
-    Check whether serial_num exists in <product>.<model>_main, and if so,
-    pull its po_num so the PO field can be auto-filled instead of typed
-    in by the user.
+    Check whether serial_num exists in <product>.<model>_<station>, and if
+    so, pull its po_num and fail_reason so the PO and Failure Mode fields
+    can be auto-filled instead of typed in by the user.
 
     Returns:
         {
-            "table_checked": "energous.esense_main",
-            "table_exists": True/False,   # does that _main table exist at all?
+            "table_checked": "energous.esense_packaging",
+            "table_exists": True/False,   # does that model_station table exist?
             "found": True/False,          # is serial_num a row in it?
-            "po_num": "<value>" or None,  # only set when found is True
+            "po_num": "<value>" or None,       # only set when found is True
+            "fail_reason": "<value>" or None,  # only set when found is True
         }
     """
-    result = {"table_checked": None, "table_exists": False, "found": False, "po_num": None}
-    if not product or not model or not serial_num:
+    result = {
+        "table_checked": None,
+        "table_exists": False,
+        "found": False,
+        "po_num": None,
+        "fail_reason": None,
+    }
+    if not product or not model or not station or not serial_num:
         return result
 
-    table_name = f"{model}_main"
+    table_name = f"{model}_{station}"
     result["table_checked"] = f"{product}.{table_name}"
 
     if not _table_exists(product, table_name):
@@ -168,7 +176,7 @@ def check_serial_in_main(product: str, model: str, serial_num: str) -> dict:
     try:
         with conn.cursor() as cur:
             query = (
-                f"SELECT po_num FROM {_quote_ident(product)}.{_quote_ident(table_name)} "
+                f"SELECT po_num, fail_reason FROM {_quote_ident(product)}.{_quote_ident(table_name)} "
                 "WHERE serial_num = %s LIMIT 1"
             )
             cur.execute(query, (serial_num,))
@@ -179,4 +187,5 @@ def check_serial_in_main(product: str, model: str, serial_num: str) -> dict:
     result["found"] = row is not None
     if row is not None:
         result["po_num"] = row["po_num"]
+        result["fail_reason"] = row["fail_reason"]
     return result
