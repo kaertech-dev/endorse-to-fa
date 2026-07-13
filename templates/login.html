@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In — Endorse To FA</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="app-window">
+    <div class="title-bar"><span class="dot"></span> Endorse To FA — Sign In</div>
+
+    <div class="header-bar">
+      <div class="logo-badge">
+        <svg viewBox="0 0 24 24"><path fill="#2f8f4e" d="M12 2C8 6 5 9 5 13a7 7 0 0 0 14 0c0-4-3-7-7-11z"/></svg>
+      </div>
+      <div class="header-text">
+        <p class="subtitle">Kaentech</p>
+        <h1>Endorse Rejects To FA</h1>
+      </div>
+    </div>
+
+    <div class="login-body">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="error-banner">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <form method="POST" action="{{ url_for('login') }}" autocomplete="off">
+        <div class="field-row">
+          <label class="field-label" for="employee_num">Employee Number</label>
+          <input type="text" id="employee_num" name="employee_num" placeholder="Enter employee number" required autofocus>
+        </div>
+        <div class="field-row">
+          <label class="field-label" for="badge">Badge</label>
+          <input type="password" id="badge" name="badge" placeholder="Enter badge" required>
+        </div>
+        <button type="submit" class="login-submit">Sign In</button>
+      </form>
+
+      <p class="login-hint">Only authorized personnel listed in fa.userv2 can endorse rejects to FA.</p>
+    </div>
+  </div>
+</body>
+</html>
